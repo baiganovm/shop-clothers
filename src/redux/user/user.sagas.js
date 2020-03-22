@@ -1,25 +1,72 @@
-import {takeLatest, put, all} from 'redux-saga/effects';
+import { all, call, put, takeLatest } from 'redux-saga/effects';
 import UserActionTypes from "./user.types";
-import { auth, createUserProfileDocument, googleProvider } from "../../firebase/firebase.utils";
-import { googleSignInFailure, googleSignInSuccess } from "./user.actions";
+import { auth, createUserProfileDocument, getCurrentUser, googleProvider } from "../../firebase/firebase.utils";
+import { signInFailure, signInSuccess, signOutFailure, signOutSuccess } from "./user.actions";
+
+export function* getSnapshotFromUserAuth(userAuth) {
+    try {
+        const userRef = yield call(createUserProfileDocument, userAuth);
+        const userSnapshot = yield userRef.get();
+        yield put(signInSuccess({id: userSnapshot.id, ...userSnapshot.data()}))
+    } catch (error) {
+        yield put(signInFailure(error))
+    }
+}
 
 export function* signInWithGoogle() {
-    try{
+    try {
         const {user} = yield auth.signInWithPopup(googleProvider);
-        // eslint-disable-next-line no-undef
-        const userRef = yield call(createUserProfileDocument, user);
-        const userSnapshot = yield userRef.get();
-        yield put(googleSignInSuccess({id: userSnapshot.id, ...userSnapshot.data()}))
+        getSnapshotFromUserAuth(user);
     } catch (error) {
-        yield put(googleSignInFailure(error))
+        yield put(signInFailure(error))
     }
+}
+
+export function* isUserAuthenticated() {
+    try {
+        const userAuth = yield getCurrentUser();
+        if (!userAuth) return;
+        yield getSnapshotFromUserAuth(userAuth);
+    } catch (error) {
+        yield put(signInFailure(error))
+    }
+}
+
+export function* signOut() {
+    try {
+        yield auth.signOut();
+        yield put(signOutSuccess());
+    } catch (error) {
+        yield put(signOutFailure(error))
+    }
+
 }
 
 export function* onGoogleSignInStart() {
     yield takeLatest(UserActionTypes.GOOGLE_SIGN_IN_START, signInWithGoogle)
 }
 
+export function* onCheckUserSession() {
+    yield takeLatest(UserActionTypes.CHECK_USER_SESSION, isUserAuthenticated);
+}
+
 export function* userSagas() {
-    // eslint-disable-next-line no-undef
-    yield all([call(onGoogleSignInStart)]);
+    yield all([call(onGoogleSignInStart), call(onEmailSignInStart), call(isUserAuthenticated), call(onSignOutStart)]);
+}
+
+function* signInWithEmail({payload: {email, password}}) {
+    try {
+        const {user} = yield auth.signInWithEmailAndPassword(email, password);
+        getSnapshotFromUserAuth(user);
+    } catch (error) {
+        put(signInFailure(error));
+    }
+}
+
+export function* onEmailSignInStart() {
+    yield takeLatest(UserActionTypes.EMAIL_SIGN_IN_START, signInWithEmail)
+}
+
+export function* onSignOutStart() {
+    yield takeLatest(UserActionTypes.SIGN_OUT_START, signOut);
 }
